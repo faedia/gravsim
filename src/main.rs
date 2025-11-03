@@ -3,9 +3,10 @@ use std::sync::Arc;
 use wgpu::{RenderPassColorAttachment, RenderPassDescriptor};
 use winit::{
     application::ApplicationHandler,
-    event::WindowEvent,
+    dpi::Size,
+    event::{self, WindowEvent},
     event_loop::{ActiveEventLoop, EventLoop},
-    window::Window,
+    window::{self, Window},
 };
 
 struct WindowSurface {
@@ -14,6 +15,7 @@ struct WindowSurface {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     window: Arc<Window>,
+    last_frame_time: std::time::Instant,
 }
 
 impl WindowSurface {
@@ -60,7 +62,7 @@ impl WindowSurface {
             format: surface_format,
             width: size.width,
             height: size.height,
-            present_mode: surface_caps.present_modes[0],
+            present_mode: wgpu::PresentMode::Immediate,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
@@ -72,6 +74,7 @@ impl WindowSurface {
             queue: queue,
             config: config,
             window: window,
+            last_frame_time: std::time::Instant::now(),
         }
     }
 
@@ -112,6 +115,7 @@ impl WindowSurface {
 
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
+        self.last_frame_time = std::time::Instant::now();
     }
 
     fn resize(&mut self, width: u32, height: u32) {
@@ -128,19 +132,56 @@ struct App {
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        let start_time = std::time::Instant::now();
         log::info!("Application resumed; creating window.");
-        let window = Arc::new(
-            event_loop
-                .create_window(Window::default_attributes())
-                .unwrap(),
-        );
+        let mut window_attributes = Window::default_attributes();
+        window_attributes.title = "GravSim Example".to_string();
+
+        if let Some(monitor) = event_loop.primary_monitor() {
+            log::info!("Using primary monitor: {:?}", monitor.name());
+            let first_mode = monitor.video_modes().next();
+            if let Some(video_mode) = first_mode {
+                log::info!(
+                    "Setting fullscreen with video mode: {}x{} @ {} mHz ({} bpp)",
+                    video_mode.size().width,
+                    video_mode.size().height,
+                    video_mode.refresh_rate_millihertz(),
+                    video_mode.bit_depth()
+                );
+                window_attributes.inner_size = Some(Size::new(winit::dpi::PhysicalSize {
+                    width: video_mode.size().width,
+                    height: video_mode.size().height,
+                }));
+                window_attributes.fullscreen = Some(window::Fullscreen::Exclusive(video_mode));
+                window_attributes.decorations = false;
+                window_attributes.resizable = false;
+            }
+        } else {
+            log::info!("No primary monitor found; using windowed mode.");
+            window_attributes.inner_size =
+                Some(Size::new(winit::dpi::LogicalSize::new(1920.0, 1080.0)));
+        }
+        window_attributes.visible = false;
+
+        let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
         self.window_surface = Some(pollster::block_on(WindowSurface::new(window.clone())));
 
         self.window_surface
             .as_mut()
             .unwrap()
             .resize(window.inner_size().width, window.inner_size().height);
+
+        window.set_visible(true);
+        window.focus_window();
+        window
+            .set_cursor_grab(window::CursorGrabMode::Confined)
+            .ok();
+
         log::info!("Window created.");
+        log::info!(
+            "Time taken to create window and surface: {:?}",
+            start_time.elapsed()
+        );
     }
 
     fn window_event(
@@ -164,6 +205,14 @@ impl ApplicationHandler for App {
                     .as_mut()
                     .unwrap()
                     .resize(size.width, size.height);
+            }
+            WindowEvent::Focused(focused) => {
+                log::trace!("Window {:?} focused: {}", window_id, focused);
+                self.window_surface
+                    .as_mut()
+                    .unwrap()
+                    .window
+                    .set_minimized(!focused);
             }
             _ => log::trace!("Skipping event {:?}", event),
         }
