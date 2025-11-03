@@ -153,7 +153,6 @@ impl ApplicationHandler for App {
                     height: video_mode.size().height,
                 }));
                 window_attributes.fullscreen = Some(window::Fullscreen::Exclusive(video_mode));
-                window_attributes.decorations = false;
                 window_attributes.resizable = false;
             }
         } else {
@@ -208,11 +207,61 @@ impl ApplicationHandler for App {
             }
             WindowEvent::Focused(focused) => {
                 log::trace!("Window {:?} focused: {}", window_id, focused);
-                self.window_surface
-                    .as_mut()
-                    .unwrap()
-                    .window
-                    .set_minimized(!focused);
+                if let Some(ws) = self.window_surface.as_mut()
+                    && ws.window.fullscreen().is_some()
+                {
+                    self.window_surface
+                        .as_mut()
+                        .unwrap()
+                        .window
+                        .set_minimized(!focused);
+                }
+            }
+            WindowEvent::KeyboardInput {
+                device_id,
+                event,
+                is_synthetic,
+            } => {
+                log::trace!(
+                    "Keyboard input on window {:?}: device_id={:?}, event={:?}, is_synthetic={}",
+                    window_id,
+                    device_id,
+                    event,
+                    is_synthetic
+                );
+
+                if event.logical_key == winit::keyboard::Key::Named(winit::keyboard::NamedKey::F11)
+                    && event.state == winit::event::ElementState::Pressed
+                {
+                    let ws = self.window_surface.as_mut().unwrap();
+                    if ws.window.fullscreen().is_some() {
+                        ws.window.set_fullscreen(None);
+                        let _ =
+                            ws.window
+                                .request_inner_size(Size::new(winit::dpi::LogicalSize::new(
+                                    1920.0, 1080.0,
+                                )));
+                        ws.resize(1920, 1080);
+                    } else {
+                        if let Some(monitor) = event_loop.primary_monitor() {
+                            let first_mode = monitor.video_modes().next();
+                            if let Some(video_mode) = first_mode {
+                                let _ = ws.window.request_inner_size(Size::new(
+                                    winit::dpi::PhysicalSize {
+                                        width: video_mode.size().width,
+                                        height: video_mode.size().height,
+                                    },
+                                ));
+
+                                ws.resize(video_mode.size().width, video_mode.size().height);
+
+                                ws.window.set_fullscreen(Some(window::Fullscreen::Exclusive(
+                                    video_mode,
+                                )));
+                            }
+                        }
+                    }
+                }
             }
             _ => log::trace!("Skipping event {:?}", event),
         }
