@@ -3,14 +3,15 @@
 /// ```rust
 /// window_surface.create_render_pipeline(
 ///     VertexShader {
-///        module: &shader,
-///       entry_point: Some("vs_main"),
-///   },
-///   ...
+///         module: &shader,
+///         entry_point: Some("vs_main"),
+///     },
+///     ...
 /// );
 /// ```
 pub struct VertexShader<'a> {
     pub module: &'a wgpu::ShaderModule,
+    pub buffers: &'a [wgpu::VertexBufferLayout<'a>],
     pub entry_point: Option<&'a str>,
 }
 
@@ -18,11 +19,11 @@ pub struct VertexShader<'a> {
 /// For use in creating a render pipeline.
 /// ```rust
 /// window_surface.create_render_pipeline(
-///   ...,
-///   FragmentShader {
-///      module: &shader,
-///     entry_point: Some("fs_main"),
-///   },
+///     ...,
+///     FragmentShader {
+///         module: &shader,
+///         entry_point: Some("fs_main"),
+///     },
 /// );
 pub struct FragmentShader<'a> {
     pub module: &'a wgpu::ShaderModule,

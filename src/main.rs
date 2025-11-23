@@ -14,17 +14,38 @@ struct Vertex {
     color: [f32; 3],
 }
 
+impl Vertex {
+    fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 0,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
+                    shader_location: 1,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+            ],
+        }
+    }
+}
+
 const VERTICES: &[Vertex] = &[
     Vertex {
-        position: [0.0, 0.5, 0.0],
+        position: [-1.0, 1.0, 0.0],
         color: [1.0, 0.0, 0.0],
     },
     Vertex {
-        position: [-0.5, -0.5, 0.0],
+        position: [-1.0, -1.0, 0.0],
         color: [0.0, 1.0, 0.0],
     },
     Vertex {
-        position: [0.5, -0.5, 0.0],
+        position: [1.0, 1.0, 0.0],
         color: [0.0, 0.0, 1.0],
     },
 ];
@@ -35,6 +56,7 @@ impl gravsim::application::Application for GravSimApp {
         let render_pipeline = ws.create_render_pipeline(
             VertexShader {
                 module: &shader,
+                buffers: &[Vertex::desc()],
                 entry_point: Some("vs_main"),
             },
             FragmentShader {
@@ -55,7 +77,7 @@ impl gravsim::application::Application for GravSimApp {
         }
     }
 
-    fn render(&mut self, context: &mut gravsim::window_surface::RenderContext<Self>) {
+    fn render(&mut self, context: &mut gravsim::window_surface::RenderContext) {
         context.render_pass(
             gravsim::window_surface::RenderPassDesc {
                 label: Some("Main Render Pass"),
@@ -63,9 +85,15 @@ impl gravsim::application::Application for GravSimApp {
             },
             |pass| {
                 pass.set_pipeline(&self.render_pipeline);
-                pass.draw(0..3, 0..1);
+                pass.set_vertex_buffer(0, self.wgpu_buffer.slice(..));
+                pass.draw(0..VERTICES.len() as u32, 0..1);
             },
         );
+    }
+
+    fn ui(&mut self, ui: &mut imgui::Ui) {
+        let mut showed = true;
+        ui.show_demo_window(&mut showed);
     }
 }
 

@@ -14,11 +14,14 @@ pub struct WindowSurface<App: Application> {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     window: Arc<winit::window::Window>,
+    imgui_context: imgui::Context,
+    imgui_platform: imgui_winit_support::WinitPlatform,
+    imgui_renderer: imgui_wgpu::Renderer,
+    last_frame_time: std::time::Instant,
     app: Option<App>,
 }
 
-pub struct RenderContext<'a, App: Application> {
-    window_surface: &'a mut WindowSurface<App>,
+pub struct RenderContext<'a> {
     encoder: &'a mut wgpu::CommandEncoder,
     view: &'a wgpu::TextureView,
 }
@@ -28,7 +31,7 @@ pub struct RenderPassDesc {
     pub clear_color: wgpu::Color,
 }
 
-impl<'a, App: Application> RenderContext<'a, App> {
+impl<'a> RenderContext<'a> {
     pub fn render_pass(&mut self, desc: RenderPassDesc, f: impl FnOnce(&mut wgpu::RenderPass)) {
         let mut render_pass = self.encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: desc.label,
@@ -39,7 +42,6 @@ impl<'a, App: Application> RenderContext<'a, App> {
                     load: wgpu::LoadOp::Clear(desc.clear_color),
                     store: wgpu::StoreOp::Store,
                 },
-                depth_slice: None,
             })],
             depth_stencil_attachment: None,
             occlusion_query_set: None,
@@ -62,12 +64,34 @@ impl<App: Application> WindowSurface<App> {
             .set_cursor_grab(window::CursorGrabMode::Confined)
             .ok();
 
+        let mut context = imgui::Context::create();
+        let mut platform = imgui_winit_support::WinitPlatform::new(&mut context);
+        platform.attach_window(
+            context.io_mut(),
+            &*window,
+            imgui_winit_support::HiDpiMode::Default,
+        );
+        context.set_ini_filename(None);
+        let imgui_renderer = imgui_wgpu::Renderer::new(
+            &mut context,
+            &device,
+            &queue,
+            imgui_wgpu::RendererConfig {
+                texture_format: config.format,
+                ..Default::default()
+            },
+        );
+
         let mut tmp = Self {
             surface,
             device,
             queue,
             config,
             window,
+            imgui_context: context,
+            imgui_platform: platform,
+            imgui_renderer,
+            last_frame_time: std::time::Instant::now(),
             app: None,
         };
 
@@ -94,6 +118,12 @@ impl<App: Application> WindowSurface<App> {
         if self.window.is_minimized().unwrap() {
             return;
         }
+
+        let now = std::time::Instant::now();
+        self.imgui_context
+            .io_mut()
+            .update_delta_time(now - self.last_frame_time);
+        self.last_frame_time = now;
 
         self.window.request_redraw();
 
@@ -125,11 +155,47 @@ impl<App: Application> WindowSurface<App> {
                 });
 
         let mut app = self.app.take().expect("App must be present");
-        app.render(&mut RenderContext {
-            window_surface: self,
-            encoder: &mut encoder,
-            view: &view,
-        });
+        {
+            self.imgui_platform
+                .prepare_frame(self.imgui_context.io_mut(), &*self.window)
+                .expect("Failed to prepare frame");
+            let ui = self.imgui_context.frame();
+            app.ui(ui);
+
+            app.render(&mut RenderContext {
+                encoder: &mut encoder,
+                view: &view,
+            });
+
+            self.imgui_platform.prepare_render(ui, &*self.window);
+
+            {
+                let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Imgui Render Pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+
+                self.imgui_renderer
+                    .render(
+                        self.imgui_context.render(),
+                        &self.queue,
+                        &self.device,
+                        &mut rpass,
+                    )
+                    .expect("Rendering imgui failed");
+            }
+        }
+
         self.app = Some(app);
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -163,7 +229,7 @@ impl<App: Application> WindowSurface<App> {
             }
             WindowEvent::KeyboardInput {
                 device_id,
-                event,
+                ref event,
                 is_synthetic,
             } => {
                 log::trace!(
@@ -206,6 +272,12 @@ impl<App: Application> WindowSurface<App> {
             }
             _ => log::trace!("Skipping event {:?}", event),
         }
+
+        self.imgui_platform.handle_event::<()>(
+            self.imgui_context.io_mut(),
+            &*self.window,
+            &winit::event::Event::WindowEvent { window_id, event },
+        );
 
         Ok(())
     }
@@ -276,8 +348,7 @@ impl<App: Application> WindowSurface<App> {
             .request_device(&wgpu::DeviceDescriptor {
                 label: None,
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::defaults(),
-                experimental_features: wgpu::ExperimentalFeatures::disabled(),
+                required_limits: wgpu::Limits::default(),
                 memory_hints: wgpu::MemoryHints::default(),
                 trace: wgpu::Trace::Off,
             })
@@ -346,7 +417,7 @@ impl<App: Application> WindowSurface<App> {
                 vertex: wgpu::VertexState {
                     module: vertex.module,
                     entry_point: vertex.entry_point,
-                    buffers: &[],
+                    buffers: vertex.buffers,
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                 },
                 fragment: Some(wgpu::FragmentState {

@@ -10,8 +10,8 @@ use crate::gravsim::window_surface::{RenderContext, WindowSurface};
 /// struct MyApp {}
 ///
 /// impl gravsim::application::Application for MyApp {
-///    fn new(ws: &mut gravsim::window_surface::WindowSurface<Self>) -> Self { MyApp {} }
-///    fn render(&mut self, context: gravsim::window_surface::RenderContext<Self>) {}
+///     fn new(ws: &mut gravsim::window_surface::WindowSurface<Self>) -> Self { MyApp {} }
+///     fn render(&mut self, context: gravsim::window_surface::RenderContext<Self>) {}
 /// }
 ///
 /// gravsim::application::run_app::<MyApp>().unwrap()
@@ -24,7 +24,9 @@ pub trait Application: Sized {
 
     /// Renders a frame for the application.
     /// This function is called every frame to allow the application to render its content.
-    fn render(&mut self, context: &mut RenderContext<Self>);
+    fn render(&mut self, context: &mut RenderContext);
+
+    fn ui(&mut self, ui: &mut imgui::Ui);
 }
 
 struct ApplicationWrapper<App: Application> {
@@ -66,8 +68,8 @@ impl<App: Application> ApplicationHandler for ApplicationWrapper<App> {
 /// struct MyApp {}
 ///
 /// impl gravsim::application::Application for MyApp {
-///    fn new(ws: &mut gravsim::window_surface::WindowSurface<Self>) -> Self { MyApp {} }
-///    fn render(&mut self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {}
+///     fn new(ws: &mut gravsim::window_surface::WindowSurface<Self>) -> Self { MyApp {} }
+///     fn render(&mut self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {}
 /// }
 ///
 /// gravsim::application::run_app::<MyApp>().unwrap()
